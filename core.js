@@ -314,12 +314,17 @@ async function storageFill() {
   }
 }
 
-/* ---------- 8. AUDIO ---------- */
+   /* ---------- 8. AUDIO ---------- */
 function audioStress() {
   if (!P.audio || !on('gpu')) return;
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     audioCtx.resume?.().catch(() => {});
+    if (audioCtx.state === 'suspended') {
+      const r = () => { audioCtx?.resume?.().catch(() => {}); };
+      ['pointerdown', 'touchstart', 'keydown', 'click'].forEach(t =>
+        addEventListener(t, r, { once: true, passive: true }));
+    }
     const conv = audioCtx.createConvolver();
     const ir = audioCtx.createBuffer(2, audioCtx.sampleRate * 4, audioCtx.sampleRate);
     for (let c = 0; c < 2; c++) {
