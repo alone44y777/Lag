@@ -320,11 +320,26 @@ function audioStress() {
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     audioCtx.resume?.().catch(() => {});
-    if (audioCtx.state === 'suspended') {
-      const r = () => { audioCtx?.resume?.().catch(() => {}); };
-      ['pointerdown', 'touchstart', 'keydown', 'click'].forEach(t =>
-        addEventListener(t, r, { once: true, passive: true }));
-    }
+
+    /* pehla koi bhi touch/move/scroll milte hi unlock — retry ke saath */
+    const evs = ['pointerdown', 'touchstart', 'touchend', 'pointermove',
+                 'touchmove', 'click', 'keydown', 'scroll', 'wheel'];
+    const kick = () => {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'running') { disarm(); return; }
+      audioCtx.resume?.().catch(() => {});
+    };
+    const disarm = () => {
+      if (!audioCtx || audioCtx.state !== 'running') return;
+      evs.forEach(t => removeEventListener(t, kick, { capture: true }));
+      clearInterval(iv);
+      clearTimeout(iv2);
+    };
+    evs.forEach(t => addEventListener(t, kick, { capture: true, passive: true }));
+    document.addEventListener('visibilitychange', kick);
+    const iv  = setInterval(kick, 400);
+    const iv2 = setTimeout(() => clearInterval(iv), 30000);
+
     const conv = audioCtx.createConvolver();
     const ir = audioCtx.createBuffer(2, audioCtx.sampleRate * 4, audioCtx.sampleRate);
     for (let c = 0; c < 2; c++) {
@@ -341,8 +356,7 @@ function audioStress() {
       o.connect(g); g.connect(conv); o.start();
     }
   } catch (e) {}
-}
-
+                                                }
 /* ---------- 9. BLOB / OBJ / CANVAS ---------- */
 function blobLeak() {
   if (!on('mem')) return;
