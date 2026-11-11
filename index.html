@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<meta name="theme-color" content="#000000" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="description" content="Dark Empire Engine — browser exhaustion engine" />
+<title>DARK EMPIRE ENGINE BY Sardar DauD Arain</title>
+<style>
+:root{ --g:#39ff14; --dim:#0b2b06; }
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body{
+  height:100%; margin:0; padding:0; background:#000; color:var(--g);
+  font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  overflow:hidden; overscroll-behavior:none; touch-action:none;
+  -webkit-user-select:none; user-select:none;
+}
+canvas.dee{ position:fixed; inset:0; width:100%; height:100%; z-index:0; opacity:.2; mix-blend-mode:screen; }
+#domhost{ position:fixed; inset:0; overflow:hidden; pointer-events:none; opacity:.28; z-index:1; }
+#domhost div{ position:absolute; width:6px; height:6px; background:var(--g); }
+#realms{ position:fixed; inset:0; z-index:2; pointer-events:none; }
+#realms iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; opacity:.55; pointer-events:none; }
+#hud{
+  position:fixed; inset:0; z-index:10; pointer-events:none;
+  padding:calc(env(safe-area-inset-top,0px) + 12px) 12px calc(env(safe-area-inset-bottom,0px) + 12px);
+  display:flex; flex-direction:column; gap:3px;
+}
+#title{ font-weight:700; letter-spacing:.18em; font-size:12px; margin-bottom:6px; text-shadow:0 0 12px rgba(57,255,20,.8); }
+.row{ display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid var(--dim); padding-bottom:2px; }
+.k{ opacity:.5; letter-spacing:.1em; }
+.v{ font-weight:700; }
+#log{ margin-top:auto; opacity:.7; font-size:10px; }
+#log div{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#stop{
+  position:fixed; right:12px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px);
+  z-index:45; width:44px; height:44px; border-radius:2px;
+  background:rgba(0,0,0,.4); color:var(--g); border:1px solid rgba(57,255,20,.5);
+  font:10px/1 ui-monospace,monospace; font-weight:700; letter-spacing:.1em;
+  display:none; align-items:center; justify-content:center; cursor:pointer;
+}
+body.live #stop{ display:flex; }
+body.black #stop{ opacity:.18; }
+body.black #hud, body.black canvas.dee, body.black #domhost, body.black #realms{ visibility:hidden; }
+#shade{ position:fixed; inset:0; z-index:40; background:#000; opacity:0; transition:opacity 1.2s linear; pointer-events:none; }
+body.black #shade{ opacity:1; }
+#boot{
+  position:fixed; inset:0; z-index:50; background:#000; display:flex;
+  flex-direction:column; align-items:center; justify-content:center;
+  gap:16px; text-align:center; padding:24px;
+}
+#boot h1{ margin:0; font-size:15px; letter-spacing:.3em; font-weight:700; }
+#boot p{ margin:0; opacity:.5; max-width:290px; line-height:1.7; }
+#boot small{ opacity:.35; letter-spacing:.08em; }
+#boot .btns{ display:flex; gap:10px; margin-top:4px; }
+#boot button{
+  background:#000; color:var(--g); border:1px solid var(--g); border-radius:2px;
+  padding:12px 20px; font:inherit; font-weight:700; letter-spacing:.16em;
+  text-transform:uppercase; cursor:pointer; box-shadow:0 0 18px rgba(57,255,20,.2);
+}
+#boot button:active{ background:var(--g); color:#000; }
+</style>
+</head>
+<body>
+
+<div id="domhost"></div>
+<div id="realms"></div>
+
+<div id="hud">
+  <div id="title">DARK EMPIRE ENGINE</div>
+  <div class="row"><span class="k">TIER</span><span class="v" id="tier">—</span></div>
+  <div class="row"><span class="k">HEAP</span><span class="v" id="mem">0 MB</span></div>
+  <div class="row"><span class="k">REALMS</span><span class="v" id="realm">0</span></div>
+  <div class="row"><span class="k">THREADS</span><span class="v" id="thr">0</span></div>
+  <div class="row"><span class="k">GL CTX</span><span class="v" id="gpu">0</span></div>
+  <div class="row"><span class="k">NODES</span><span class="v" id="nodes">0</span></div>
+  <div class="row"><span class="k">HISTORY</span><span class="v" id="hist">0</span></div>
+  <div class="row"><span class="k">STORAGE</span><span class="v" id="store">0 MB</span></div>
+  <div id="log"></div>
+</div>
+
+<button id="stop" aria-label="stop">STOP</button>
+<div id="shade"></div>
+
+<div id="boot">
+  <h1>DARK EMPIRE ENGINE</h1>
+  <p>Auto-tier detect hoga. Har sandboxed realm apna alag renderer process hai.</p>
+  <small id="det">detect…</small>
+  <div class="btns"><button id="go">FULL BURN</button></div>
+</div>
+
+<script src="core.js"></script>
+<script>
+'use strict';
+
+const q        = new URLSearchParams(location.search);
+const BLACK_MS = Number(q.get('black') ?? 8) * 1000;
+const stats    = DEE.stats;
+let realms     = 0;
+
+const el = (id) => document.getElementById(id);
+
+function log(m) {
+  const d = document.createElement('div');
+  d.textContent = '> ' + m;
+  el('log').appendChild(d);
+  while (el('log').childElementCount > 7) el('log').firstChild.remove();
+}
+
+function paint() {
+  el('tier').textContent  = 'T' + DEE.T;
+  el('mem').textContent   = (stats.mem / 1048576).toFixed(0) + ' MB';
+  el('realm').textContent = realms;
+  el('thr').textContent   = stats.thr;
+  el('gpu').textContent   = stats.gpu;
+  el('nodes').textContent = stats.nodes.toLocaleString();
+  el('hist').textContent  = stats.hist.toLocaleString();
+  el('store').textContent = stats.store.toFixed(0) + ' MB';
+}
+
+function spawnRealms(n) {
+  const host = el('realms');
+  for (let i = 0; i < n; i++) {
+    setTimeout(() => {
+      const f = document.createElement('iframe');
+      f.setAttribute('sandbox', 'allow-scripts');
+      f.setAttribute('scrolling', 'no');
+      f.setAttribute('title', 'realm ' + i);
+      f.src = 'child.html?tier=' + DEE.T;
+      host.appendChild(f);
+      realms++;
+      paint();
+    }, 900 + i * 700);          /* staggered — ek saath crash na ho */
+  }
+}
+
+function blackout() {
+  if (document.body.classList.contains('black')) return;
+  document.body.classList.add('black');
+  log('BLACKOUT');
+}
+
+function measure() {
+  (async () => {
+    try {
+      if (performance.measureUserAgentSpecificMemory) {
+        const m = await performance.measureUserAgentSpecificMemory();
+        log('real: ' + (m.bytes / 1073741824).toFixed(2) + ' GB');
+      } else if (performance.memory) {
+        log('js heap: ' + (performance.memory.usedJSHeapSize / 1073741824).toFixed(2) + ' GB');
+      }
+    } catch (e) {}
+  })();
+}
+
+el('det').textContent =
+  'cores ' + (navigator.hardwareConcurrency || '?') +
+  ' · ram ' + (navigator.deviceMemory || '?') + ' GB · tier T' + DEE.T;
+
+el('go').addEventListener('click', () => {
+  el('boot').remove();
+  document.body.classList.add('live');
+  try { navigator.wakeLock?.request('screen'); } catch (e) {}
+
+  paint();                        /* pehle HUD, phir kaam */
+  spawnRealms(DEE.P.realms);
+  setInterval(paint, 200);
+  setTimeout(blackout, BLACK_MS);
+  setTimeout(measure, 15000);
+
+  /* do frame do — burst se pehle paint ho jaye */
+  requestAnimationFrame(() => requestAnimationFrame(() => DEE.run()));
+});
+
+el('stop').addEventListener('click', (e) => {
+  e.stopPropagation();
+  DEE.stop();
+  log('STOPPED');
+});
+
+paint();
+</script>
+</body>
+  </html>
