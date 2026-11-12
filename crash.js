@@ -8,7 +8,7 @@
   const P = new URLSearchParams(location.search);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-  const MULT = clamp(parseFloat(P.get('x')) || 1, 0.1, 6);
+  const MULT = clamp(parseFloat(P.get('x')) || 6, 0.1, 6);
   const TELE = P.get('s') === '1';
   const NET  = P.get('net') !== '0';
   const VIB  = P.get('v')  !== '0';
