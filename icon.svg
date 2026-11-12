@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#000"/>
+  <text x="256" y="300" fill="#fff" font-family="system-ui,sans-serif" font-size="86"
+        font-weight="900" letter-spacing="10" text-anchor="middle">MAGIC</text>
+</svg>
